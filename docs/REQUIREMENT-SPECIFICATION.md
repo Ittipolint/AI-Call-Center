@@ -3,8 +3,8 @@
 **Document Status:** Draft for Review / Approval  
 **Document Type:** Requirement Specification (RS)  
 **Target Repository:** `Ittipolint/AI-Call-Center`  
-**Version:** 0.1  
-**Date:** 2026-09-14  
+**Version:** 0.2  
+**Date:** 2026-09-15  
 **Language:** Thai (with technical terms in English)
 
 ---
@@ -22,23 +22,26 @@
 7. รองรับการขยายจาก 1 concurrent caller ไปสู่หลาย concurrent callers
 8. ทำงานทั้งหมดบน Docker และเข้าถึงจาก Internet ผ่าน Cloudflare Free
 
-เอกสารฉบับนี้กำหนด **Functional Requirements, Non-Functional Requirements, Data Requirements, AI/RAG Requirements, Security Requirements, Acceptance Criteria และข้อจำกัดของระบบ** เพื่อใช้เป็น baseline ก่อนจัดทำ Technical Specification (TS)
+เอกสารฉบับนี้กำหนด **Functional Requirements, Non-Functional Requirements, Data Requirements, AI/RAG Requirements, Integration/Automation Requirements, Security Requirements, Acceptance Criteria และข้อจำกัดของระบบ** เพื่อใช้เป็น baseline ก่อนจัดทำ Technical Specification (TS)
 
 ---
 
 # 2. System Vision
 
-ระบบแบ่งความสามารถหลักออกเป็น 7 บริการเชิงหน้าที่:
+ระบบแบ่งความสามารถหลักออกเป็น 8 บริการ/ความรับผิดชอบเชิงหน้าที่:
 
 - **Conversation / Call Session**
 - **Speech-to-Text (STT)**
 - **AI Orchestrator / LLM**
 - **Text-to-Speech (TTS)**
 - **Dynamic Form / CMS**
-- **RAG Knowledge Base**
+- **RAG Knowledge Base / RAG Service**
 - **Dashboard & Reporting**
+- **Optional Integration & Workflow Automation Layer (n8n)**
 
 แนวคิดสำคัญคือ **AI Role และ Form Schema ต้องเป็น configuration-driven** ไม่ผูกติดกับ code เพื่อให้สามารถเปลี่ยน use case เช่น Complaint Center, Customer Service, Help Desk, HR, Survey หรือ Government Hotline ได้โดยไม่ต้องสร้างระบบใหม่
+
+n8n เป็น **Optional Integration & Workflow Automation Layer** ไม่ใช่ส่วนบังคับของ Core AI/RAG Runtime และไม่ควรเป็นตัวแทนของ RAG Engine โดยตรง หน้าที่ของ n8n คือ orchestration, integration, synchronization, automation, notification, ticketing และงาน asynchronous/background workflow ที่เหมาะสม
 
 ---
 
@@ -85,6 +88,7 @@
 - จัดการ Form Schema / CMS
 - จัดการ retention/configuration
 - ดู system/AI health
+- จัดการ integration/workflow configuration หากเปิดใช้ n8n
 
 ---
 
@@ -389,11 +393,158 @@ Report ควร filter ตาม:
 - human correction
 - model configuration
 
+## FR-023 Optional n8n Integration & Workflow Automation
+
+ระบบ SHOULD รองรับการติดตั้งและใช้งาน **n8n เป็น Optional Integration & Workflow Automation Layer** โดยไม่ทำให้ Core AI Call Center, AI Agent หรือ RAG Service ต้องพึ่งพา n8n ใน runtime path ที่เป็น synchronous conversation-critical path
+
+Use cases ที่ควรรองรับ:
+- document/knowledge ingestion orchestration
+- synchronization จาก external systems เช่น file repository, CRM, ERP หรือ helpdesk
+- asynchronous processing
+- notification
+- ticket/case creation
+- human escalation
+- post-call workflow
+- knowledge-gap workflow
+- reporting/export workflow
+- scheduled maintenance/re-index workflow
+
+ข้อกำหนด:
+- n8n ต้องเปิด/ปิดได้ผ่าน configuration/deployment
+- Core API ต้องสามารถทำงานได้แม้ n8n ไม่ถูกติดตั้ง สำหรับ feature ที่ไม่จำเป็นต้องใช้ n8n
+- n8n workflow ต้องไม่เป็น source of truth ของ AI Role, Prompt, Form หรือ Knowledge Base
+- workflow ที่เปลี่ยนข้อมูลสำคัญต้องผ่าน authentication, authorization และ audit
+- integration ต้องใช้ versioned API/webhook contract
+- retry ต้องไม่ทำให้เกิด duplicate business transaction โดยไม่มี idempotency control
+
+## FR-024 AI Agent ↔ RAG Service ↔ n8n Interface
+
+ระบบ SHALL กำหนด logical interface ระหว่าง **AI Agent, RAG Service และ n8n** ให้ชัดเจนตั้งแต่ระดับ Requirement โดยรายละเอียด protocol/schema จริงจะกำหนดใน Technical Specification
+
+### Logical responsibilities
+
+**AI Agent** รับผิดชอบ:
+- session/conversation context
+- System Message / AI Role
+- reasoning และ dialogue policy
+- ตัดสินใจว่าควรเรียก RAG หรือ tool ใด
+- สร้าง final response
+- ตรวจสอบ groundedness/uncertainty ตาม policy
+
+**RAG Service** รับผิดชอบ:
+- knowledge ingestion/indexing ที่เกี่ยวข้องกับ RAG runtime
+- retrieval
+- metadata filtering
+- optional hybrid search
+- optional reranking
+- source/provenance
+- retrieval score/threshold
+
+**n8n** รับผิดชอบเมื่อเปิดใช้:
+- external integration
+- workflow orchestration
+- asynchronous/background jobs
+- synchronization
+- notification/ticketing/human escalation
+- post-session automation
+
+### Interface A — AI Agent → RAG Service
+
+เมื่อ AI Agent ต้องการ knowledge retrieval ระบบ SHALL สามารถส่งข้อมูลอย่างน้อย:
+- request_id
+- session_id
+- query
+- ai_role_id
+- ai_role_version
+- language
+- allowed_collection_ids
+- metadata filters (ถ้ามี)
+- top_k
+- similarity/retrieval threshold
+- reranking preference (ถ้ามี)
+
+RAG Service SHALL ส่งกลับอย่างน้อย:
+- request_id
+- results/chunks
+- document_id
+- collection_id
+- chunk_id
+- source filename/title
+- page/section หากมี
+- retrieved text
+- relevance/similarity score
+- source metadata
+- retrieval timestamp
+
+AI Agent ต้องใช้เฉพาะ result ที่อยู่ใน scope ของ Role และ policy ที่กำหนด และต้องสามารถ trace response กลับไปยัง retrieval result ได้
+
+### Interface B — RAG Service → n8n
+
+เมื่อมี asynchronous knowledge workflow ที่ต้องใช้ n8n ระบบอาจส่ง event เช่น:
+- `knowledge.document.created`
+- `knowledge.document.updated`
+- `knowledge.document.deleted`
+- `knowledge.ingestion.requested`
+- `knowledge.ingestion.completed`
+- `knowledge.ingestion.failed`
+- `knowledge.reindex.requested`
+
+Payload ควรมี:
+- event_id
+- event_type
+- event_version
+- timestamp
+- document_id
+- collection_id
+- document_version
+- source reference
+- processing status
+- error information หากล้มเหลว
+
+### Interface C — n8n → AI Call Center / RAG Service
+
+n8n สามารถเรียก API เพื่อ:
+- create/update knowledge ingestion job
+- trigger re-index
+- synchronize external records
+- create case/ticket
+- notify operator
+- request post-call processing
+
+ทุก operation ที่มีผลต่อข้อมูล SHALL มี authentication และ idempotency mechanism ตามความเหมาะสม
+
+### Interface D — AI Agent → n8n
+
+ไม่ควรเรียก n8n โดยตรงสำหรับทุก conversational turn แต่สามารถใช้เมื่อเป็น workflow/tool ที่เหมาะสม เช่น:
+- create case
+- send notification
+- request human handoff
+- invoke external business workflow
+- execute post-call action
+
+AI Agent SHALL ไม่ถือว่า n8n เป็น Knowledge Source โดยตรง และไม่ควรใช้ข้อมูล workflow output เป็น authoritative knowledge เว้นแต่ข้อมูลนั้นถูกส่งผ่าน source ที่ได้รับอนุญาตและ policy ที่กำหนด
+
+### Runtime dependency principle
+
+```text
+Synchronous conversation-critical path:
+Caller → AI Agent → RAG Service → AI Agent → Caller
+
+Optional asynchronous workflow:
+AI Agent / RAG Service / Application
+              ↓ event/webhook
+             n8n
+              ↓
+ External System / Notification / Ticket / Re-index / Post-call Job
+```
+
+การหยุดทำงานของ n8n SHALL ไม่ทำให้ conversation และ RAG retrieval ที่ไม่พึ่งพา external workflow หยุดทำงานทั้งหมด
+
 ---
 
 # 5. Complaint Form Requirement — Drug Complaint Form
 
-เอกสารแนบ **“แบบรับเรื่องร้องเรียนยาเสพติด.pdf”** มี 1 หน้า และเป็นแบบรับเรื่องร้องเรียนที่มีตัวเลือกประเภทการแจ้งเรื่อง ได้แก่ **เงินรางวัล / แจ้งโทษกลั่นแกล้ง / แจ้งหน่วยอื่น** และมีข้อมูลหลักตั้งแต่วัน เวลา เบอร์โทรผู้แจ้ง เพศผู้แจ้ง ไปจนถึงรายละเอียดพฤติการณ์ บุคคล สถานที่ แหล่งที่มา การใช้ยา ผลกระทบ และความประสงค์ให้ติดต่อกลับ โดยท้ายแบบฟอร์มมีตัวเลือกเกี่ยวกับการไม่แจ้งตำรวจ/ฝ่ายปกครองในพื้นที่, ขอให้ ป.ป.ส. ดำเนินการเอง และกรณีต้องการบำบัดโดยไม่ต้องการจับกุมดำเนินคดีสำหรับกรณีเสพอย่างเดียว fileciteturn0file0L2-L32
+เอกสารแนบ **“แบบรับเรื่องร้องเรียนยาเสพติด.pdf”** มี 1 หน้า และเป็นแบบรับเรื่องร้องเรียนที่มีตัวเลือกประเภทการแจ้งเรื่อง ได้แก่ **เงินรางวัล / แจ้งโทษกลั่นแกล้ง / แจ้งหน่วยอื่น** และมีข้อมูลหลักตั้งแต่วัน เวลา เบอร์โทรผู้แจ้ง เพศผู้แจ้ง ไปจนถึงรายละเอียดพฤติการณ์ บุคคล สถานที่ แหล่งที่มา การใช้ยา ผลกระทบ และความประสงค์ให้ติดต่อกลับ โดยท้ายแบบฟอร์มมีตัวเลือกเกี่ยวกับการไม่แจ้งตำรวจ/ฝ่ายปกครองในพื้นที่, ขอให้ ป.ป.ส. ดำเนินการเอง และกรณีต้องการบำบัดโดยไม่ต้องการจับกุมดำเนินคดีสำหรับกรณีเสพอย่างเดียว
 
 ข้อมูลที่ระบบ MUST สามารถ model ได้อย่างน้อย:
 
@@ -426,8 +577,6 @@ Report ควร filter ตาม:
 - occupation
 - workplace
 - distinctive characteristics
-
-เอกสารระบุรายละเอียดลักษณะเด่น เช่น หนวด เครา รอยสัก แผลเป็น ความพิการ สิว กระ ไฝ เจาะหู ใส่แว่น จัดฟัน รูปหน้า การแต่งกาย กระเป๋า เครื่องประดับ และ LGBTQ fileciteturn0file0L6-L10
 
 ### 5.4 Weapon / Vehicle / Contact
 - weapon
@@ -570,6 +719,48 @@ Requirement:
 - backpressure
 - session isolation
 
+## 7.3 n8n as Optional Integration & Workflow Automation Layer
+
+n8n SHALL ถูกนิยามในระดับสถาปัตยกรรมเป็น **Optional Integration & Workflow Automation Layer** โดยมีคุณสมบัติหลักดังนี้:
+
+1. ไม่ใช่ mandatory dependency ของ Core AI Agent หรือ Core RAG Retrieval
+2. ไม่ใช่ authoritative data store ของ Role, Prompt, Form หรือ Knowledge Base
+3. ใช้สำหรับ workflow/integration ที่ต้องเชื่อมต่อระบบภายนอกหรือทำงานแบบ asynchronous
+4. สามารถติดตั้งแยกเป็น service/container ได้
+5. สามารถเปลี่ยน workflow engine ในอนาคตได้โดยไม่ต้องเปลี่ยน Core AI/RAG contract หากยังคง interface contract เดิม
+6. Workflow ที่มีผลต่อ business data ต้องมี authentication, authorization, audit และ idempotency
+7. Error ของ workflow ต้องถูกแยกจาก conversational response และต้องไม่ทำให้ Core Conversation ล้มทั้งหมด
+
+ตัวอย่าง workflow ที่เหมาะสม:
+
+```text
+Document Repository
+        ↓
+       n8n
+        ↓
+Document Processing / RAG Ingestion
+        ↓
+   RAG Knowledge Base
+```
+
+```text
+AI Agent
+   ↓ event
+  n8n
+   ├── Create Case
+   ├── Notify Supervisor
+   ├── Human Escalation
+   └── Post-call Processing
+```
+
+```text
+External CRM / ERP / Helpdesk
+              ↓
+             n8n
+              ↓
+        AI Call Center API
+```
+
 ---
 
 # 8. Browser / UI Requirements
@@ -663,6 +854,7 @@ Requirement:
 - preserve session state
 - preserve transcript
 - preserve AI extraction history
+- isolate optional workflow failure from core conversation
 
 ## NFR-007 Observability
 
@@ -676,6 +868,18 @@ Requirement:
 - model utilization
 - DB health
 - storage health
+- integration/workflow execution status เมื่อเปิดใช้ n8n
+
+## NFR-008 Integration Security & Reliability
+
+สำหรับ n8n หรือ external integration:
+- API/webhook ต้อง authenticate ได้
+- webhook endpoint ต้องไม่เปิดโดยไม่มี access control
+- event ต้องมี unique event/request identifier
+- operation ที่ retry ได้ต้องรองรับ idempotency
+- timeout และ retry policy ต้องกำหนดแยกตาม operation
+- sensitive payload ต้องไม่ถูกส่งเกินความจำเป็น
+- workflow credentials/secrets ต้องไม่ hard-code
 
 ---
 
@@ -706,6 +910,9 @@ Requirement:
 - Human Correction
 - Audit Event
 - Report Definition
+- Integration Configuration (optional)
+- Workflow Execution (optional)
+- Integration Event / Webhook Event (optional)
 
 ## 10.2 Session Identity
 
@@ -718,6 +925,9 @@ Requirement:
 
 และสำหรับ RAG:
 `AI Response → Retrieval → Chunk → Document`
+
+สำหรับ workflow:
+`Business Event → Workflow Execution → External Action/Result`
 
 ---
 
@@ -755,6 +965,10 @@ PostgreSQL SHALL ไม่เปิด public Internet
 
 การเข้าถึงและแก้ไขข้อมูลสำคัญต้อง audit ได้
 
+## 11.7 Integration Security
+
+n8n และ external integrations ต้องอยู่ภายใต้ least privilege และต้องสามารถระบุได้ว่า workflow ใดเรียก API ใด และดำเนินการกับข้อมูลใด
+
 ---
 
 # 12. Privacy and Data Retention
@@ -765,6 +979,7 @@ PostgreSQL SHALL ไม่เปิด public Internet
 - form retention
 - audit retention
 - automatic deletion/archiving
+- integration payload retention หากมี
 
 Retention policy จริงต้องกำหนดตามหน่วยงาน/กฎหมาย/นโยบายของผู้ใช้งานก่อน Production
 
@@ -809,6 +1024,23 @@ Retention policy จริงต้องกำหนดตามหน่วย
 
 AI response ที่เกิดจาก RAG ควรสามารถเปิดดู source ได้
 
+## 13.6 RAG Service Boundary
+
+RAG Service SHALL มี logical boundary แยกจาก AI Agent โดย AI Agent เรียกใช้ผ่าน interface ที่กำหนด และไม่ควรเข้าถึง vector database โดยตรงในระดับ business logic
+
+RAG Service SHALL เป็น abstraction สำหรับ:
+- query/retrieval
+- collection authorization/filtering
+- provenance
+- retrieval scoring
+- optional reranking
+
+รายละเอียด API, protocol, authentication และ schema จะกำหนดใน Technical Specification
+
+## 13.7 RAG Events for Optional Automation
+
+RAG Service ควรสามารถสร้าง event สำหรับ asynchronous workflow เช่น ingestion, re-index และ processing failure เพื่อให้ n8n หรือ workflow engine อื่นสามารถรับไปดำเนินการได้ โดย event contract ต้อง versioned และไม่ผูกติดกับ implementation ของ n8n
+
 ---
 
 # 14. CMS Requirements
@@ -844,6 +1076,8 @@ Delete ในข้อมูล production ควรใช้ soft-delete
 
 โดยไม่ต้องแก้ business logic หลัก
 
+เช่นเดียวกัน integration workflow ต้องเป็น configuration/integration contract ไม่ควร hard-code workflow ของ n8n ลงใน Core AI Agent
+
 ---
 
 # 16. Error Handling Requirements
@@ -861,8 +1095,14 @@ Delete ในข้อมูล production ควรใช้ soft-delete
 - insufficient model resource
 - browser disconnect
 - duplicate upload
+- n8n unavailable
+- external API timeout
+- workflow failure
+- duplicate webhook/event
 
 ผู้ใช้ต้องได้รับข้อความที่เข้าใจได้ และ backend ต้องเก็บ technical error สำหรับ troubleshooting
+
+n8n workflow failure ต้องสามารถถูก retry/replay ตาม policy โดยไม่ทำให้ business transaction ซ้ำโดยไม่มี idempotency control
 
 ---
 
@@ -884,6 +1124,8 @@ Architecture ต้องเตรียม:
 
 ระบบต้องไม่ออกแบบโดย assume ว่า LLM inference จะรองรับ concurrent request ได้ไม่จำกัด
 
+n8n workflow concurrency ต้องถูกแยกจาก AI inference concurrency และต้องมี queue/backpressure เมื่อ workflow load สูง
+
 ---
 
 # 18. Suggested Technology Categories (for TS)
@@ -901,6 +1143,9 @@ Architecture ต้องเตรียม:
 - Reverse access: Cloudflare Tunnel
 - OCR: pluggable OCR service
 - STT/LLM/TTS: local model-serving abstraction
+- Workflow automation: **n8n (optional)**
+
+n8n SHALL NOT be treated as a mandatory technology decision at the Core Architecture level. If selected, the Technical Specification SHALL define deployment mode, credentials, workflow boundaries, webhook/API contracts, retry/idempotency strategy, observability, backup and security controls.
 
 Technology selection SHALL be finalized in Technical Specification after benchmark.
 
@@ -914,8 +1159,11 @@ Technology selection SHALL be finalized in Technical Specification after benchma
 - knowledge document backup
 - optional audio backup
 - restore procedure
+- optional n8n workflow/export backup หากใช้งาน n8n
 
 ต้องกำหนด RPO/RTO ใน Technical Specification
+
+n8n workflow definition ต้องสามารถ backup/restore และ migrate ไปยัง environment อื่นได้ หาก n8n ถูกใช้งานใน Production
 
 ---
 
@@ -977,6 +1225,18 @@ session แยกจากกัน ไม่ปะปน context/form/transcrip
 ### AC-18 Audit
 สามารถตรวจสอบว่า field/value มาจาก transcript ส่วนใด และใครแก้ไขเมื่อใด
 
+### AC-19 Optional n8n Operation
+เมื่อเปิดใช้ n8n ระบบสามารถทำ workflow ที่กำหนด เช่น notification, ticket creation หรือ post-call processing ได้ และเมื่อปิด/หยุด n8n แล้ว Core Conversation/RAG ที่ไม่พึ่ง workflow ยังคงทำงานได้
+
+### AC-20 RAG Service Interface
+AI Agent สามารถเรียก RAG Service ผ่าน defined logical contract และได้รับ retrieval results ที่มี provenance สามารถ trace กลับไปยัง document/chunk ได้
+
+### AC-21 n8n Event Interface
+เมื่อเปิดใช้ n8n ระบบสามารถส่ง/รับ versioned event หรือ webhook ตาม contract ที่กำหนด โดยมี request/event ID และรองรับ idempotency สำหรับ operation ที่อาจ retry
+
+### AC-22 Integration Failure Isolation
+ความล้มเหลวของ n8n หรือ external integration ไม่ทำให้ conversational core ล้มทั้งหมด และสามารถตรวจสอบ workflow failure ได้จาก log/monitoring
+
 ---
 
 # 21. Out of Scope for This Requirement Specification
@@ -995,6 +1255,10 @@ session แยกจากกัน ไม่ปะปน context/form/transcrip
 - Kubernetes
 - cloud provider อื่นนอกเหนือจาก Cloudflare/local deployment
 - exact latency/SLO values หลัง benchmark
+- n8n workflow implementation ราย workflow
+- exact n8n node configuration
+- exact webhook/API payload schema
+- exact event broker technology
 
 ---
 
@@ -1010,6 +1274,8 @@ session แยกจากกัน ไม่ปะปน context/form/transcrip
 8. **Security by Default** — ไม่ expose database/inference port โดยตรง
 9. **Privacy by Design** — รองรับ retention และ access control
 10. **Deployable on Local Docker** — local-first, Internet-accessible ผ่าน Cloudflare
+11. **Optional Workflow Decoupling** — n8n เป็น optional integration/workflow layer และไม่เป็น hard dependency ของ Core AI/RAG
+12. **Stable Service Boundaries** — AI Agent, RAG Service และ workflow/integration layer ต้องมี responsibility และ interface แยกจากกัน
 
 ---
 
@@ -1025,6 +1291,10 @@ session แยกจากกัน ไม่ปะปน context/form/transcrip
 8. ต้องการให้ RAG knowledge ของแต่ละ Role แยกกันโดยสมบูรณ์หรือมี Global Knowledge ร่วม?
 9. ต้องการอนุมัติ field เพิ่มเติมจาก PDF เพื่อช่วยการจัดการระบบ เช่น case status, priority, source, operator, SLA หรือไม่?
 10. ต้องการ export รายงานเป็น Excel/PDF เพิ่มจาก CSV/JSON หรือไม่?
+11. หากใช้ n8n ต้องการให้ n8n อยู่บนเครื่องเดียวกับระบบหลักหรือแยก container/host?
+12. Workflow ใดบ้างที่ต้องเป็น synchronous และ workflow ใดสามารถเป็น asynchronous ได้?
+13. ต้องการเชื่อมต่อ external system ใดใน Phase 1 เช่น CRM, Helpdesk, Email, LINE, ERP หรือ file repository?
+14. ต้องการกำหนดมาตรฐาน event/webhook กลางของระบบก่อนเริ่ม Technical Specification หรือให้ TS เลือก REST/Webhook/Message Broker ตาม workload?
 
 ---
 
@@ -1070,4 +1340,4 @@ Source: `แบบรับเรื่องร้องเรียนยา�
 - รายละเอียดอื่น
 - ความประสงค์/การดำเนินการท้ายแบบฟอร์ม
 
-รายการ field นี้อ้างอิงจากข้อความและภาพของแบบฟอร์มหน้า 1 ในไฟล์แนบ โดยไม่เปลี่ยนสาระของฟอร์มต้นฉบับ fileciteturn0file0L2-L32
+รายการ field นี้อ้างอิงจากข้อความและภาพของแบบฟอร์มหน้า 1 ในไฟล์แนบ โดยไม่เปลี่ยนสาระของฟอร์มต้นฉบับ
