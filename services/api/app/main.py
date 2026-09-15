@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="AI Call Center API", version="1.0.0", openapi_url="/api/v1/openapi.json", docs_url="/docs")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://localhost:3001"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
 security = HTTPBearer(auto_error=False)
 SECRET = os.getenv("JWT_SECRET", "development-only-change-me")
 MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_BYTES", "26214400"))

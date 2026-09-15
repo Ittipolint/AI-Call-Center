@@ -30,5 +30,6 @@ The repository must not report real Thai/English/Chinese speech quality, OCR acc
 - `docker compose build realtime` — **PASS**.
 - `docker compose build web` — **PASS**. The build completed, but npm reported dependency advisories; upgrade dependencies before production deployment.
 - `docker compose up -d` plus `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8080/health` — **PASS**. API and realtime returned HTTP 200. Port 3000 was occupied by an existing local service, so this stack maps its web service to `127.0.0.1:3001`.
+- Login CORS regression fix: API explicitly permits both local web origins (`localhost:3000` and `localhost:3001`).
 
 This report is updated after each test run with the exact command and result.
