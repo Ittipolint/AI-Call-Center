@@ -1,0 +1,77 @@
+name: ai-call-center
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: callcenter
+      POSTGRES_USER: callcenter
+      POSTGRES_PASSWORD: callcenter
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callcenter -d callcenter"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-minio}
+    volumes: [minio-data:/data]
+    networks: [internal]
+  api:
+    build: ./services/api
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://callcenter:callcenter@postgres:5432/callcenter}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["127.0.0.1:8000:8000"]
+    networks: [internal, edge]
+  realtime:
+    build: ./services/realtime
+    environment:
+      API_BASE_URL: http://api:8000/api/v1
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-replace-with-a-long-random-token}
+    depends_on: [api]
+    ports: ["127.0.0.1:8080:8080"]
+    networks: [internal, edge]
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
+      NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8080}
+    depends_on: [api, realtime]
+    ports: ["127.0.0.1:3001:3000"]
+    networks: [internal, edge]
+  n8n:
+    image: n8nio/n8n:latest
+    profiles: ["n8n"]
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-}
+    volumes: [n8n-data:/home/node/.n8n]
+    networks: [internal]
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  n8n-data:
+networks:
+  internal:
+    internal: true
+  edge:

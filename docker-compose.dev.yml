@@ -1,0 +1,7 @@
+services:
+  api:
+    volumes: [./services/api/app:/app/app]
+  web:
+    command: npm run dev
+    volumes: [./apps/web:/app]
+
